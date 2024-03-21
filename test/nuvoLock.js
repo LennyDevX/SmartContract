@@ -16,11 +16,11 @@ describe("StakingContract", function () {
 
   it("Should deposit successfully and increase the total pool balance", async function () {
     // Make deposits from the owner account
-    const depositAmount = ethers.utils.parseEther("11");
+    const depositAmount = ethers.utils.parseEther("100");
     await staking.connect(owner).deposit({ value: depositAmount });
 
     const depositInContract = await staking.getTotalDeposit(owner.address);
-    expect(ethers.utils.formatEther(depositInContract)).to.equal('10.45');  // 11 - 5%
+    expect(ethers.utils.formatEther(depositInContract)).to.equal('95.0');  // 11 - 5%
 
     console.log(`Deposit amount (after commision): ${ethers.utils.formatEther(depositInContract)}`);
   });
@@ -69,13 +69,13 @@ describe("StakingContract", function () {
     await staking.connect(owner).pause();
 
     // Try to deposit
-    const depositAmount = ethers.utils.parseEther("11");
+    const depositAmount = ethers.utils.parseEther("100");
     await expect(staking.connect(addr1).deposit({value: depositAmount})).to.be.revertedWith("Pausable: paused");
     console.log(`Deposit failed when contract is paused`)
   });
 
   it("Should allow claim rewards when contract is not paused and there are rewards", async function () {
-    const depositAmount = ethers.utils.parseEther("11");
+    const depositAmount = ethers.utils.parseEther("100");
     await staking.connect(owner).deposit({value: depositAmount});
 
     // Advance time by 3 days using the helper function
@@ -91,7 +91,7 @@ describe("StakingContract", function () {
 });
 
   it("Should not allow claims (rewards) when contract is paused", async function () {
-    const depositAmount = ethers.utils.parseEther("11");
+    const depositAmount = ethers.utils.parseEther("100");
     await staking.connect(owner).deposit({value: depositAmount});
 
     await staking.connect(owner).pause();
@@ -101,25 +101,37 @@ describe("StakingContract", function () {
     
   });
 
-  it("Should allow to claim rewards and then withdraw them considering commission", async function () {
+ it("Should calculate accumulated rewards over 7 days and allow to claim and withdraw them with commission", async function () {
     // First deposit an amount
-    const depositAmount = ethers.utils.parseEther("20");
-
+    const depositAmount = ethers.utils.parseEther("100");
     const depositResult = await staking.connect(owner).deposit({value: depositAmount});
     const depositResultData = await depositResult.wait();
-    let commissionFee = depositResultData.events.pop().args.amount;
-    let actualAmount = depositAmount.sub(commissionFee);
+    let commissionFeeDeposit = depositResultData.events.pop().args.commission;
+    let actualAmount = depositAmount.sub(commissionFeeDeposit);
 
-    // Advance time by 7 days using the helper function
-    await ethers.provider.send("evm_increaseTime", [7 * 86400]); // 86400 seconds in a day
-    await ethers.provider.send("evm_mine");  // Mine the next block
+    let totalRewards = ethers.utils.parseEther("0");
 
-    // Calculate rewards before withdrawal (considering commission)
-    let rewardsBeforeWithdraw = await staking.calculateRewards(owner.address); 
-    rewardsBeforeWithdraw = rewardsBeforeWithdraw.sub(rewardsBeforeWithdraw.mul(5).div(100)); // Subtract the 5% commission
+    for (let i = 0; i < 7; i++) {
+        // Advance time by 1 day
+        await ethers.provider.send("evm_increaseTime", [86400]); // 86400 seconds in a day
+        await ethers.provider.send("evm_mine");  // Mine the next block
 
-    // Now claim rewards (withdraw)
+        // Calculate rewards
+        let rewardsEndOfDay = await staking.calculateRewards(owner.address);
+        console.log(`Day ${i + 1} : ${ethers.utils.formatEther(rewardsEndOfDay)} rewards`);
+
+        // Add to the total
+        totalRewards = totalRewards.add(rewardsEndOfDay);
+    }
+
+    console.log(`Total rewards before claim - 5% fee: ${ethers.utils.formatEther(totalRewards)}`);
+
+    // Now claim rewards 
     await staking.connect(owner).claimRewards();
+
+    // Calculate commission fee just before withdrawal
+    let commissionFeeClaim = totalRewards.mul(5).div(100); // 5% commission
+    let rewardsActual = totalRewards.sub(commissionFeeClaim);
 
     let balanceBefore = await ethers.provider.getBalance(owner.address);
     await staking.connect(owner).withdrawRewards();
@@ -128,32 +140,7 @@ describe("StakingContract", function () {
     // Check that the balance after withdrawing is greater than the balance before
     expect(balanceAfter).to.be.gt(balanceBefore);
     
-    console.log(`Actual deposit: ${ethers.utils.formatEther(actualAmount)} | Rewards before withdrawal: ${ethers.utils.formatEther(rewardsBeforeWithdraw)}`);
-    console.log(`Balance before: ${ethers.utils.formatEther(balanceBefore)} | Balance after: ${ethers.utils.formatEther(balanceAfter)}`);
-    console.log(`Rewards withdrawn: ${ethers.utils.formatEther(balanceAfter.sub(balanceBefore))}`);
-});
-
-  it("Should show the accumulated rewards over 7 days", async function () {
-    // First deposit an amount
-    const depositAmount = ethers.utils.parseEther("20");
-    await staking.connect(owner).deposit({value: depositAmount});
-
-    let totalRewards = ethers.utils.parseEther("0");
-  
-    for (let i = 0; i < 7; i++) {
-        // Advance time by 1 day
-        await ethers.provider.send("evm_increaseTime", [86400]); // 86400 seconds in a day
-        await ethers.provider.send("evm_mine");  // Mine the next block
-  
-        // Calculate rewards
-        let rewardsEndOfDay = await staking.calculateRewards(owner.address);
-        console.log(`Day ${i + 1}: ${ethers.utils.formatEther(rewardsEndOfDay)} rewards`);
-
-        // Add to total
-        totalRewards = totalRewards.add(rewardsEndOfDay);
-    }
-
-    console.log(`Total rewards after 7 days: ${ethers.utils.formatEther(totalRewards)}`);
-  });
-
-});
+    console.log(`Actual deposit after 5% fee: ${ethers.utils.formatEther(actualAmount)}`);
+    console.log(`Expected rewards - 5% fee: ${ethers.utils.formatEther(rewardsActual)}`);
+    console.log(`Actual withdrawn rewards: ${ethers.utils.formatEther(balanceAfter.sub(balanceBefore))}`);    
+});})

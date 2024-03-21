@@ -17,12 +17,12 @@ contract StakingContract is Ownable, Pausable {
     address public treasury;
     uint256 public totalPoolBalance;
  
-    struct Deposit {
-        uint256 amount;
-        uint256 lastClaimTime;
+    struct User {
+    uint256 totalDeposit;
+    uint256 lastClaimTime;
     }
 
-    mapping(address => Deposit[]) public userDeposits;
+    mapping(address => User) private users;
     mapping(address => uint256) public userRewards; 
 
     event DepositMade(address indexed user, uint256 amount, uint256 commission);
@@ -34,78 +34,70 @@ contract StakingContract is Ownable, Pausable {
     }
 
     function setTreasury(address _newTreasury) external onlyOwner {
+        require(_newTreasury != address(0), "New treasury address is the zero address");
         treasury = _newTreasury;
     }
 
     function deposit() public payable whenNotPaused {
-        require(msg.value <= MAX_DEPOSIT, "Deposit exceeds the maximum");
-        uint256 commission = msg.value.mul(COMMISSION_PERCENTAGE).div(10000);
-        uint256 depositAmount = msg.value.sub(commission);
-        totalPoolBalance = totalPoolBalance.add(depositAmount);
+    require(msg.value <= MAX_DEPOSIT, "Deposit exceeds the maximum");
+    
+    uint256 commission = msg.value.mul(COMMISSION_PERCENTAGE).div(10000);
+    uint256 depositAmount = msg.value.sub(commission);
+    
+    totalPoolBalance = totalPoolBalance.add(depositAmount);
 
-        userDeposits[msg.sender].push(Deposit({
-            amount: depositAmount,
-            lastClaimTime: block.timestamp
-        }));
+    users[msg.sender].totalDeposit = users[msg.sender].totalDeposit.add(depositAmount);
+    users[msg.sender].lastClaimTime = block.timestamp;
 
-        (bool success, ) = payable(treasury).call{value: commission}("");
-        require(success, "Failed to transfer commission");
+    (bool success, ) = payable(treasury).call{value: commission}("");
+    require(success, "Failed to transfer commission");
 
-        emit DepositMade(msg.sender, depositAmount, commission);
-    }
+    emit DepositMade(msg.sender, depositAmount, commission);
+}
 
     function getTotalDeposit(address user) public view returns(uint256) {
-        Deposit[] storage deposits = userDeposits[user];
-        uint256 totalDeposit = 0;
-
-        for(uint256 i = 0; i < deposits.length; i++) {
-            totalDeposit = totalDeposit.add(deposits[i].amount);
-        }
-
-        return totalDeposit;
+        return users[user].totalDeposit;
     }
 
     function getLastClaimTime(address user) public view returns (uint256) {
-    require(userDeposits[user].length > 0, "User has no deposits");
+        return users[user].lastClaimTime;
+    }
 
-    return userDeposits[user][userDeposits[user].length - 1].lastClaimTime;
-}
+    function calculateRewards(address userAddress) public view returns(uint256) {
+        User storage user = users[userAddress];
 
-    function calculateRewards(address user) public view returns(uint256) {
-        Deposit[] storage deposits = userDeposits[user];
-        uint256 totalRewards = 0;
-
-        for(uint256 i = 0; i < deposits.length; i++) {
-            uint256 daysPassed = (block.timestamp - deposits[i].lastClaimTime) / 1 days;
-            uint256 reward = deposits[i].amount.mul(DAILY_ROI_PERCENTAGE).div(10000) * daysPassed;
-            totalRewards = totalRewards.add(reward);
-        }
+        uint256 daysPassed = (block.timestamp.sub(user.lastClaimTime)) / 1 days;      
+        uint256 totalRewards = user.totalDeposit.mul(DAILY_ROI_PERCENTAGE).div(10000).mul(daysPassed);
 
         return totalRewards;
     }
 
     function claimRewards() public whenNotPaused {
-        Deposit[] storage deposits = userDeposits[msg.sender];
-        
-        uint256 totalRewards = calculateRewards(msg.sender);
-        require(totalRewards > 0, "No rewards to claim");
+    User storage user = users[msg.sender];
 
-        uint256 commission = totalRewards.mul(COMMISSION_PERCENTAGE).div(10000);
-        totalRewards = totalRewards.sub(commission);
+    uint256 daysPassed = (block.timestamp.sub(user.lastClaimTime)) / 1 days;
+    uint256 totalRewards = user.totalDeposit.mul(DAILY_ROI_PERCENTAGE).div(10000).mul(daysPassed);
+    uint256 commission = totalRewards.mul(COMMISSION_PERCENTAGE).div(10000);
 
-        totalPoolBalance = totalPoolBalance.sub(totalRewards.add(commission));
+    require(totalPoolBalance >= totalRewards.add(commission), "Not enough funds in the pool");
+    require(totalRewards > 0, "No rewards to claim");
 
-        for(uint256 i = 0; i < deposits.length; i++) {
-            deposits[i].lastClaimTime = block.timestamp;
-        }
+    totalRewards = totalRewards.sub(commission);
 
-        (bool success, ) = payable(treasury).call{value: commission}("");
-        require(success, "Failed to transfer commission");
+    totalPoolBalance = totalPoolBalance.sub(totalRewards.add(commission));
 
-        userRewards[msg.sender] = userRewards[msg.sender].add(totalRewards);
+    // Actualiza el total de depósito del usuario
+    user.totalDeposit = user.totalDeposit.sub(totalRewards);
 
-        emit RewardClaimed(msg.sender, totalRewards);
-    }
+    user.lastClaimTime = block.timestamp;
+
+    (bool success, ) = payable(treasury).call{value: commission}("");
+    require(success, "Failed to transfer commission");
+
+    userRewards[msg.sender] = userRewards[msg.sender].add(totalRewards);
+
+    emit RewardClaimed(msg.sender, totalRewards);
+}
 
     function withdrawRewards() public {
         require(userRewards[msg.sender] > 0, "No rewards to withdraw");
@@ -118,6 +110,11 @@ contract StakingContract is Ownable, Pausable {
         emit RewardWithdrawn(msg.sender, reward);
     }
 
+    function emergencyWithdraw(address to) public onlyOwner {
+    (bool success, ) = to.call{value: address(this).balance}("");
+    require(success, "Emergency withdraw failed");
+    }
+
     function pause() public onlyOwner {
         _pause();
     }
@@ -125,6 +122,10 @@ contract StakingContract is Ownable, Pausable {
     function unpause() public onlyOwner {
         _unpause();
     }
+
+    function addBalance() public payable onlyOwner {
+    // el balance será añadido automáticamente
+}
 
     receive() external payable {}
 }
