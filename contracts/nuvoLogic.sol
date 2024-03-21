@@ -10,7 +10,8 @@ contract StakingContract is Ownable, Pausable {
 
     uint256 public constant DURATION = 7 days;
     uint256 public constant WEEKLY_ROI_PERCENTAGE = 5e2; // 5%
-    uint256 public constant DAILY_ROI_PERCENTAGE = WEEKLY_ROI_PERCENTAGE / 7; 
+    uint256 public constant HOURLY_ROI_PERCENTAGE = WEEKLY_ROI_PERCENTAGE / (7*24); // return per hour
+    uint256 public constant MAX_ROI_PERCENTAGE = 13500; // 135% 
     uint256 public constant COMMISSION_PERCENTAGE = 500; // 5%
     uint256 public constant MAX_DEPOSIT = 10000 ether; // 10000 Matic 
 
@@ -64,40 +65,48 @@ contract StakingContract is Ownable, Pausable {
     }
 
     function calculateRewards(address userAddress) public view returns(uint256) {
-        User storage user = users[userAddress];
-
-        uint256 daysPassed = (block.timestamp.sub(user.lastClaimTime)) / 1 days;      
-        uint256 totalRewards = user.totalDeposit.mul(DAILY_ROI_PERCENTAGE).div(10000).mul(daysPassed);
-
-        return totalRewards;
+    User storage user = users[userAddress];
+    uint256 hoursPassed = (block.timestamp - user.lastClaimTime) / 1 hours;      
+    uint256 totalRewards = user.totalDeposit.mul(HOURLY_ROI_PERCENTAGE).div(10000).mul(hoursPassed);
+    
+    // Apply max ROI limit
+    uint256 maxReward = user.totalDeposit.mul(MAX_ROI_PERCENTAGE).div(10000);
+    if (totalRewards > maxReward) {
+        totalRewards = maxReward;
     }
-
-    function claimRewards() public whenNotPaused {
-    User storage user = users[msg.sender];
-
-    uint256 daysPassed = (block.timestamp.sub(user.lastClaimTime)) / 1 days;
-    uint256 totalRewards = user.totalDeposit.mul(DAILY_ROI_PERCENTAGE).div(10000).mul(daysPassed);
-    uint256 commission = totalRewards.mul(COMMISSION_PERCENTAGE).div(10000);
-
-    require(totalPoolBalance >= totalRewards.add(commission), "Not enough funds in the pool");
-    require(totalRewards > 0, "No rewards to claim");
-
-    totalRewards = totalRewards.sub(commission);
-
-    totalPoolBalance = totalPoolBalance.sub(totalRewards.add(commission));
-
-    // Actualiza el total de depósito del usuario
-    user.totalDeposit = user.totalDeposit.sub(totalRewards);
-
-    user.lastClaimTime = block.timestamp;
-
-    (bool success, ) = payable(treasury).call{value: commission}("");
-    require(success, "Failed to transfer commission");
-
-    userRewards[msg.sender] = userRewards[msg.sender].add(totalRewards);
-
-    emit RewardClaimed(msg.sender, totalRewards);
+    return totalRewards;
 }
+
+   function claimRewards() public whenNotPaused {
+        User storage user = users[msg.sender];
+
+        uint256 hoursPassed = (block.timestamp - user.lastClaimTime) / 1 hours;
+        uint256 totalRewards = user.totalDeposit.mul(HOURLY_ROI_PERCENTAGE).div(10000).mul(hoursPassed);
+        uint256 commission = totalRewards.mul(COMMISSION_PERCENTAGE).div(10000);
+
+        // Apply max ROI limit
+        uint256 maxReward = user.totalDeposit.mul(MAX_ROI_PERCENTAGE).div(10000);
+        if (totalRewards > maxReward) {
+            totalRewards = maxReward;
+        }
+        
+        require(totalPoolBalance >= totalRewards.add(commission), "Not enough funds in the pool");
+        require(totalRewards > 0, "No rewards to claim");
+
+        totalRewards = totalRewards.sub(commission);
+
+        totalPoolBalance = totalPoolBalance.sub(totalRewards.add(commission));
+
+        // Update last claim time
+        user.lastClaimTime = block.timestamp;
+
+        (bool success, ) = payable(treasury).call{value: commission}("");
+        require(success, "Failed to transfer commission");
+
+        userRewards[msg.sender] = userRewards[msg.sender].add(totalRewards);
+
+        emit RewardClaimed(msg.sender, totalRewards);
+    }
 
     function withdrawRewards() public {
         require(userRewards[msg.sender] > 0, "No rewards to withdraw");
