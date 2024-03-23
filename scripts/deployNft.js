@@ -1,33 +1,33 @@
-// Import libraries
-const ethers = require('ethers');
-const fs = require('fs');
-require('dotenv').config();
+const { ethers } = require("ethers");
 
-// Set Alchemy API key and private key from your .env file
-const ALCHEMY_API_KEY = process.env.ALCHEMY_API_KEY;
+const ABI = require('../artifacts/contracts/nuvoLogic.sol/StakingContract.json'); 
+const MAINNET = process.env.POLYGON_MAINNET;
 const PRIVATE_KEY = process.env.PRIVATE_KEY;
+const NUVO_TOKEN_CONTRACT = process.env.NUVO_TOKEN_CONTRACT;
 
-// Set up new provider and wallet
-const provider = new ethers.providers.JsonRpcProvider(`https://polygon-mumbai.g.alchemy.com/v2/${ALCHEMY_API_KEY}`);
-const wallet = new ethers.Wallet(PRIVATE_KEY, provider);
+// URL del proveedor de red Ethereum (por ejemplo, Infura)
+const providerUrl = "https://polygon-mainnet.g.alchemy.com/v2/" + MAINNET;
 
-async function main() {
+// Instanciar un proveedor de red
+const provider = new ethers.providers.JsonRpcProvider(providerUrl);
 
-  // Replace '../artifacts/contracts/NuvoNFT.sol/NuvoNFT.json' with correct path to your contract artifact if different
-  const contractArtifact = require('../artifacts/contracts/nuvoNFT.sol/NuvoToken.json')
+// Instanciar una instancia del contrato
+const signer = new ethers.Wallet(PRIVATE_KEY, provider);
+const contract = new ethers.Contract(NUVO_TOKEN_CONTRACT, ABI.abi, signer);
 
-  const NuvoNFT = new ethers.ContractFactory(contractArtifact.abi, contractArtifact.bytecode, wallet);
+async function addBalanceToContract() {
+    try {
+        // Enviar transacción para llamar a la función addBalance
+        const tx = await contract.addBalance({ value: ethers.utils.parseEther("0.4") });
 
-  const nftContract = await NuvoNFT.deploy();
-  console.log("Waiting for deployment...");
+        // Esperar a que se confirme la transacción
+        await tx.wait();
 
-  await nftContract.deployed();
-  console.log("NFT Contract deployed at:", nftContract.address);
-};
+        console.log("Balance agregado exitosamente al contrato.");
+    } catch (error) {
+        console.error("Error al agregar balance al contrato:", error);
+    }
+}
 
-main()
-  .then(() => process.exit(0))
-  .catch((error) => {
-    console.error(error);
-    process.exit(1);
-  });
+// Llamar a la función addBalanceToContract
+addBalanceToContract();

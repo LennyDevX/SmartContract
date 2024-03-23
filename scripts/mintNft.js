@@ -6,7 +6,7 @@ const ethers = hre.ethers;
 // Importing contract artifacts
 const contractArtifact = require('../artifacts/contracts/nuvoNFT.sol/NuvoToken.json'); 
 
-const ALCHEMY_API_KEY = process.env.ALCHEMY_API_KEY;
+const POLYGON_MUMBAI = process.env.POLYGON_MUMBAI;
 const PRIVATE_KEY = process.env.PRIVATE_KEY;
 const NUVO_TOKEN_CONTRACT = process.env.NUVO_TOKEN_CONTRACT;
 
@@ -15,7 +15,7 @@ async function main() {
     const network = process.env.ALCHEMY_NETWORK;
 
     // Use ethers provider to connect to the set network
-    const provider = new ethers.providers.JsonRpcProvider(`https://polygon-mumbai.g.alchemy.com/v2/${ALCHEMY_API_KEY}`);
+    const provider = new ethers.providers.JsonRpcProvider(`https://polygon-mumbai.g.alchemy.com/v2/${POLYGON_MUMBAI}`);
     const wallet = new ethers.Wallet(PRIVATE_KEY, provider);
 
     // Create instance of contract with the provider
